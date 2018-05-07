@@ -1,0 +1,120 @@
+---
+title: "Stage 2 Clustering"
+author: "Sarthak Sharma"
+date: "May 7, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Seurat)
+```
+
+## Load the data
+Load the data from Stage 1 of clustering
+```{r load}
+cb.stage1 <- readRDS("~/cb_filtered.rds")
+```
+
+## Subset the data
+Since we were interested in the neural-specific cells, we used a subset of the original data for further analysis. Specifically, we used clusters 3,5,8 and 9 from the stage 1 of clustering.
+```{r subset}
+cb.neural <- SubsetData(cb.stage1, cells.use = WhichCells(cb.stage1, ident = c(3,5,8,9)))
+```
+
+## Remove previous identity information
+```{r removeIdent}
+cb.neural <- SetAllIdent(cb.neural, id = NULL)
+```
+
+## Identification of Variable Genes
+```{r findVariableGenes}
+cb.neural <- FindVariableGenes(object = cb.neural,x.low.cutoff = 0.0125,
+                              x.high.cutoff = 3,y.cutoff = 0.5, do.plot = F)
+```
+```{r PlotVariableGenes, echo=FALSE, message=FALSE, warning=FALSE}
+
+VariableGenePlot(cb.neural,do.text = F, do.contour = F)
+```
+
+## Dimensional Reduction Analysis
+```{r scale, results="hide"}
+cb.neural <- ScaleData(object = cb.neural, vars.to.regress = c("nUMI"))
+```
+```{r runpca}
+cb.neural <- RunPCA(cb.neural, pc.genes = cb.neural@var.genes, do.print = T, pcs.print = 1:5, genes.print = 5)
+cb.neural <- ProjectPCA(cb.neural, do.print = F)
+```
+
+### Determination of statistically significant PCs
+Similar to Stage 1 of clustering
+```{r pca}
+PCHeatmap(cb.neural,pc.use = 1:7,cells.use = 500,do.balanced = T, label.columns = F, use.full = F)
+PCElbowPlot(object=cb.neural)
+```
+```{r jackstraw, echo=TRUE, message=FALSE,warning=FALSE}
+cb.neural <- JackStraw(cb.neural, num.replicate = 100, do.print = F)
+```
+```{r jackstrawplot, echo=FALSE, message=FALSE,warning=FALSE}
+JackStrawPlot(cb.neural, PCs = 1:20)
+```
+
+### Single Cell Clustering and differential gene expression
+#### Find and Plot Clusters
+```{r findAndValidateClusters, echo=TRUE, message=TRUE,warning=FALSE}
+cb.neural <- FindClusters(cb.neural, reduction.type = "pca", 
+                         dims.use = 1:7, resolution = 0.8,
+                         print.output = 0, save.SNN = F, force.recalc = T)
+cb.neural<- RunTSNE(cb.neural, dims.use = 1:7, do.fast = T)
+TSNEPlot(cb.neural, do.label = T, label.size = 8,pt.size = 1)
+```
+
+#### Find Differentially Expressed Gene Markers
+```{r findMarkers, echo=TRUE, message=FALSE, warning=FALSE}
+cb.neural.allMarkers <- FindAllMarkers(cb.neural)
+```
+
+### Save the R object
+```{r saveObject}
+saveRDS(cb.neural, file = "~/cb_neural.rds")
+```
+
+## Miscellaneous
+We changed the identity of clusters to character labels to distinguish these from the clusters of stage 1
+```{r manualReIdent}
+ident0.cells <- WhichCells(cb.neural, ident = 0)
+ident1.cells <- WhichCells(cb.neural, ident = 1)
+ident2.cells <- WhichCells(cb.neural, ident = 2)
+ident3.cells <- WhichCells(cb.neural, ident = 3)
+ident4.cells <- WhichCells(cb.neural, ident = 4)
+ident5.cells <- WhichCells(cb.neural, ident = 5)
+ident6.cells <- WhichCells(cb.neural, ident = 6)
+ident7.cells <- WhichCells(cb.neural, ident = 7)
+
+cb.neural <- SetIdent(object = cb.neural,cells.use = ident0.cells,ident.use = "A")
+cb.neural <- SetIdent(object = cb.neural,cells.use = ident1.cells,ident.use = "B")
+cb.neural <- SetIdent(object = cb.neural,cells.use = ident2.cells,ident.use = "C")
+cb.neural <- SetIdent(object = cb.neural,cells.use = ident3.cells,ident.use = "D")
+cb.neural <- SetIdent(object = cb.neural,cells.use = ident4.cells,ident.use = "E")
+cb.neural <- SetIdent(object = cb.neural,cells.use = ident5.cells,ident.use = "F")
+cb.neural <- SetIdent(object = cb.neural,cells.use = ident6.cells,ident.use = "G")
+cb.neural <- SetIdent(object = cb.neural,cells.use = ident7.cells,ident.use = "H")
+```
+
+### TSNE Plot with the new identities
+```{r newTsne}
+TSNEPlot(cb.neural, do.label = T, label.size = 8,pt.size = 1)
+```
+
+### Manual Splitting of Clusters
+Based on our observations of gene markers, we decided to split certain clusters manually. Refer the main paper for the details. The process of manual splitting involves interaction with the plot. Details for the same can be found on 'Seurat' website (<http://satijalab.org/seurat/>).
+
+```{r manualSplit, eval=FALSE}
+select.cells.1 <- FeaturePlot(object = cb.neural, features.plot = "KH2013:KH.C2.442" , 
+            cells.use = WhichCells(cb.neural, ident = "B"), do.identify = T)
+cb.neural <- SetIdent(object = cb.neural,cells.use = select.cells.1,ident.use = "I")
+
+select.cells.2 <- FeaturePlot(object = cb.neural, features.plot = "KH2013:KH.S605.3", 
+                         do.identify = T)
+cb.neural <- SetIdent(object = cb.neural,cells.use = select.cells.2,ident.use = "J")
+```
