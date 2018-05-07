@@ -1,0 +1,124 @@
+---
+title: "Clustering Stage 1"
+author: "Sarthak Sharma"
+date: "May 2, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Seurat)
+library(magrittr)
+library(dplyr)
+library(grid)
+library(gridExtra)
+```
+## Preprocessing
+To filter out low quality single cell transcriptomes, we selected genes which were expressed in at least 3 cells and selected cells which expressed a minimum of 250 genes and a maximum of 3000 genes.
+
+```{r create}
+cb.data <- Read10X(data.dir = "~/KH2013/")
+cbObject <- CreateSeuratObject(raw.data = cb.data, min.cells = 3, min.genes = 200, normalization.method = "LogNormalize", project = "Ciona_Single_Cell")
+cb.filtered <- FilterCells(object = cbObject, subset.names = c("nGene"), low.thresholds = c(250), high.thresholds = c(3000))
+
+```
+```{r geneDist, echo=FALSE, message=FALSE, warning=FALSE}
+test3000 <- FilterCells(cbObject, subset.names = c("nGene"), low.thresholds = c(250), high.thresholds = c(3000))
+
+frac_3000 = round(length(test3000@cell.names)/length(cbObject@cell.names)*100,2)
+
+VlnPlot(object = cbObject, features.plot = c("nGene")) +
+  geom_hline(yintercept = 3000) +
+  annotate("text", 0.6, 3000, vjust = -0.6, label = paste(frac_3000,"%",sep = ""),size = 6, color = "#F8766D") +
+  geom_hline(yintercept = 250) +
+  scale_y_continuous(breaks = c(250,3000)) + 
+  labs(y="Gene Count", title = "Distribution of gene counts")
+```
+
+## Identification of Variable Genes
+```{r FindVariableGenes}
+cb.filtered <- FindVariableGenes(object=cb.filtered, mean.function = ExpMean, 
+                                    dispersion.function = LogVMR, x.low.cutoff = 0.0125, 
+                                    x.high.cutoff = 3, y.cutoff = 0.5, do.plot = F)
+```
+```{r PlotVariableGenes, echo=FALSE, message=FALSE, warning=FALSE}
+
+VariableGenePlot(cb.filtered,do.text = F, do.contour = F)
+```
+
+## Dimensional Reduction Analysis
+The data was scaled to remove unwanted sources of variation. The variable genes were used as input to the PCA. The PCA Scores were then projected onto the rest of the genes.
+```{r scale, results="hide"}
+cb.filtered <- ScaleData(object = cb.filtered, vars.to.regress = c("nUMI"))
+```
+```{r runpca}
+cb.filtered <- RunPCA(cb.filtered, pc.genes = cb.filtered@var.genes, do.print = T, pcs.print = 1:5, genes.print = 5)
+cb.filtered <- ProjectPCA(cb.filtered, do.print = F)
+```
+
+### Determination of statistically significant PCs
+To determine statistically significant and suitable PCs, we performed a supervised analysis as described by the 'Seurat' Documentation (<http://satijalab.org/seurat/>). 
+
+#### Heatmap and pairwise comparison
+Heatmap
+```{r pcplots, echo=TRUE, message=FALSE,warning=FALSE}
+PCHeatmap(cb.filtered, pc.use = 1:12,cells.use = 500,do.balanced = T, label.columns = F, use.full = F, label.rows = F)
+```
+
+Pairwise comparison of PCs
+```{r pcPairwise, echo=TRUE, message=FALSE, warning=FALSE}
+# Removing the colors use cols.use
+PCAPlot(cb.filtered,dim.1 = 1, dim.2 = 2,do.return = F, no.legend = T,
+                     cols.use = rep(c("black"),times=10))
+```
+
+```{r pcgrid, echo=FALSE, message=FALSE, warning=FALSE}
+plotList <- list()
+c <- 0
+for (i in seq(1,20,2))
+{
+  c = c + 1
+  pcaPlot <- PCAPlot(cb.filtered,dim.1 = i, dim.2 = i+1,do.return = T, no.legend = T,
+                     cols.use = rep(c("black"),times=10))
+  pcaPlot <- pcaPlot +
+    theme(axis.text = element_text(size=12), axis.title = element_text(size=12))
+  plotList[[c]] <- pcaPlot
+}
+grid.arrange(grobs = plotList,nrow=3,ncol=4,top="PCA Plots")
+```
+
+#### JackStraw resampling test with 100 replications
+```{r jackstraw, echo=TRUE, message=FALSE,warning=FALSE}
+cb.filtered <- JackStraw(cb.filtered, num.replicate = 100, do.print = F)
+```
+```{r jackstrawplot, echo=FALSE, message=FALSE,warning=FALSE}
+JackStrawPlot(cb.filtered, PCs = 1:20)
+```
+
+#### Plot of Standard Deviations for each of the PCs
+```{r elbowplot, echo=TRUE, message=FALSE,warning=FALSE}
+PCElbowPlot(cb.filtered)
+```
+
+#### Find and Validate Clusters
+```{r findAndValidateClusters, echo=TRUE, message=TRUE,warning=FALSE}
+cb.filtered <- FindClusters(cb.filtered, reduction.type = "pca", 
+                               dims.use = 1:7, resolution = 0.6,
+                               print.output = 0, save.SNN = T, force.recalc = T)
+
+ValidateClusters(cb.filtered,pc.use = 1:7,top.genes = 30,
+                 min.connectivity = 0.001,acc.cutoff = 0.9,verbose = T)
+```
+
+#### TSNE Plot
+```{r tsneplot, echo=TRUE, message=FALSE,warning=FALSE}
+cb.filtered <- RunTSNE(cb.filtered, dims.use = 1:7, do.fast = T)
+TSNEPlot(cb.filtered,do.label = T, label.size = 8,pt.size = 1)
+```
+
+#### Find Differentially Expressed Gene Markers
+```{r findMarkers, echo=TRUE, message=FALSE, warning=FALSE}
+cb.filtered.allMarkers <- FindAllMarkers(cb.filtered)
+```
+
+We can now use the obtained markers to output them to csv files or use them in other analyses.
